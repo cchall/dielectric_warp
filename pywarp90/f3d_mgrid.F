@@ -7536,7 +7536,6 @@ c     --- Only slab geometry is now supported.
         return
       endif
 
-
 c     --- The parallel version does not yet work, due to the issue dealing
 c     --- with epsilon, described below.
 c      if (fsdecomp%nxprocs*fsdecomp%nyprocs*fsdecomp%nzprocs > 1) then
@@ -7983,10 +7982,6 @@ C         if(izproc==0)then
 C           print*, "TAC-PIN",fsdecomp%nz,coarsedecomp%nz,testarraycoarse
 C         endif
 #ifdef MPIPARALLEL
-C         if (any(coarsedecomp%mpistatex == 1) .or.
-C      &      any(coarsedecomp%mpistatez == 1)) then
-C           print*, "eps exchange tried"
-C           !!print*,"MPI State",coarsedecomp%mpistatex,coarsedecomp%mpistatez
 C           print*,"on proc",izproc,"coarse mpistatez:",coarsedecomp%mpistatez
 C           print*,"on proc",izproc,"full mpistatez:",fsdecomp%mpistatez
 C           call mgexchange_phi2(1,nxlocalcoarse,0,nzlocalcoarse,
@@ -7995,10 +7990,6 @@ C      &                        0,0,1,1,coarsedecomp)
           call mgexchange_epsilon2(1,nxlocalcoarse,0,nzlocalcoarse,
      &                        epsiloncoarse,1,0,1,
      &                        -1,-1,0,0,coarsedecomp)
-C         endif
-C         call mgexchange_eps_periodic(1,nxlocalcoarse,0,nzlocalcoarse,
-C      &                               epsiloncoarse,1,0,1,
-C      &                               -1,-1,localboundsc,fsdecomp)
 #endif
         if(izproc==0)then
           print*, "TAC-PEX",nxlocalcoarse,nzlocalcoarse,epsiloncoarse
@@ -8006,20 +7997,7 @@ C      &                               -1,-1,localboundsc,fsdecomp)
         if(izproc==1)then
           print*, "TAC-PEX",nxlocalcoarse,nzlocalcoarse,epsiloncoarse
         endif
-C         do ti=0,nxlocalcoarse+1
-C           do tj=0,nzlocalcoarse+1
-C             epsiloncoarse(ti,tj) = testarraycoarse(ti,tj) 
-C           enddo
-C         enddo
 
-C #ifdef MPIPARALLEL
-C         if(izproc==0) then
-C           localboundsc(5) = -1
-C         endif
-C         if(izproc==1) then
-C           localboundsc(4) = -1 
-C         endif
-C #endif
 C         print*,'on:',izproc,nxlocalcoarse+2,nzlocalcoarse+2,epsiloncoarse
 c       --- XXX epsiloncoarse needs to be exchanged among neighboring
 c       --- XXX processors. This code needs to be written, so this solver
@@ -8053,7 +8031,6 @@ c       --- Continue at the next coarsest level.
           call mgexchange_phiupdate(1,nxlocalcoarse,0,nzlocalcoarse,
      &                        phicoarse,nxguardphi,0,nzguardphi,
      &                        -1,-1,coarsedecomp)
-          print*, "PHIUPDATE CALLED FOR COARASE"
         endif
 #endif
         if (lprintmgarraysumdiagnostic) then
@@ -8070,13 +8047,11 @@ c       --- Add in resulting error.
         call applyboundaryconditions3d(nxlocal,0,nzlocal,
      &                                 nxguardphi,0,nzguardphi,phi,1,
      &                                 localbounds,.false.,.false.)
-C         print*,"PHI1",nxlocal+nxguardphi,nzlocal+nzguardphi,phi
 #ifdef MPIPARALLEL
         call mgexchange_phi_periodic(1,nxlocal,0,nzlocal,phi,
      &                               nxguardphi,0,nzguardphi,
      &                               -1,-1,localbounds,fsdecomp)
 #endif
-C         print*,"PHI2",nxlocal+nxguardphi,nzlocal+nzguardphi,phi
         deallocate(phicoarse,rhocoarse,epsiloncoarse,testarraycoarse)
         deallocate(res)
 
@@ -8103,7 +8078,6 @@ C         print*,"PHI2",nxlocal+nxguardphi,nzlocal+nzguardphi,phi
      &                      nxguardphi,0,nzguardphi,
      &                      -1,-1,fsdecomp)
 #endif
-C         print*,"PHI3",nxlocal+nxguardphi,nzlocal+nzguardphi,phi
         call mggetarraysum(nxlocal,0,nzlocal,nxguardphi,0,nzguardphi,
      &                     phi,fsdecomp,0,sss)
         if (lpe0) print*,"V5 phi",mglevel,sss
@@ -8220,7 +8194,7 @@ c       --- grid refinement.
         do iz=izmin,izmax
           ix1 = ixmin + mod(ixmin + iz + parity,2)
           do ix=ix1,ixmax,2
-C           Finding Phi(i,j)_k+1 = (1-w)*Phi(i,j)_k + w*S(i,j)
+
             phi(ix,iz) = mgparam*(rho(ix,iz) +
      &        0.5*(epsilon(ix  ,iz)+epsilon(ix  ,iz+1))*phi(ix-1,iz  )*dxsqi +
      &        0.5*(epsilon(ix+1,iz)+epsilon(ix+1,iz+1))*phi(ix+1,iz  )*dxsqi +
@@ -8468,7 +8442,6 @@ c     --- substantial amount of time.
         izmina(izcoarse) = izmin
         izmaxa(izcoarse) = izmax
         wza(:,izcoarse) = wz
-C         print*,'IZ',izmin,izmax,wza
       enddo
 
       do ixcoarse=1,nxlocalcoarse
@@ -8484,7 +8457,6 @@ C         print*,'IZ',izmin,izmax,wza
         ixmina(ixcoarse) = ixmin
         ixmaxa(ixcoarse) = ixmax
         wxa(:,ixcoarse) = wx
-C         print*,'IX',ixmin,ixmax,wxa
       enddo
 
 c     --- Do the loops.
