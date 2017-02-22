@@ -7536,13 +7536,14 @@ c     --- Only slab geometry is now supported.
         return
       endif
 
+
 c     --- The parallel version does not yet work, due to the issue dealing
 c     --- with epsilon, described below.
-      if (fsdecomp%nxprocs*fsdecomp%nyprocs*fsdecomp%nzprocs > 1) then
-        print*,"multigrid2ddielectricsolve: does not yet work in parallel"
-        call kaboom("multigrid2ddielectricsolve: does not yet work in parallel")
-        return
-      endif
+c      if (fsdecomp%nxprocs*fsdecomp%nyprocs*fsdecomp%nzprocs > 1) then
+c        print*,"multigrid2ddielectricsolve: does not yet work in parallel"
+c        call kaboom("multigrid2ddielectricsolve: does not yet work in parallel")
+c        return
+c      endif
 
 c     --- If doing initialization only, then exit.
       if (iwhich == 1) return
@@ -7685,6 +7686,7 @@ c=============================================================================
       use Multigrid3d_diagnostic
       use Constant,Only: eps0
       use Decompositionmodule
+      integer(ISZ):: ci,cj,ti,tj
       integer(ISZ):: mglevel
       real(kind=8):: mgscale
       integer(ISZ):: nx,nz,nxlocal,nzlocal
@@ -7707,7 +7709,7 @@ c=============================================================================
 c Routine that does the v-cycle for multigrid. Note that it is recursive.
 
       real(kind=8),allocatable:: phicoarse(:,:),rhocoarse(:,:)
-      real(kind=8),allocatable:: epsiloncoarse(:,:)
+      real(kind=8),allocatable:: epsiloncoarse(:,:),testarraycoarse(:,:)
       real(kind=8),allocatable:: res(:,:)
       integer(ISZ):: i,iszone=1
       integer(ISZ):: nxcoarse,nycoarse,nzcoarse,nylocal
@@ -7891,13 +7893,22 @@ c       --- Calculate the xmminlocal of the coarse grid
         rzoffset = 0
         xmminlocalcoarse = xmminlocal
 #endif
-
+        print*,"IZ",izproc,coarsedecomp%iz
 c       --- Alloate new work space
         allocate(phicoarse(-1:nxlocalcoarse+1,-1:nzlocalcoarse+1),
      &           stat=allocerror)
         if (allocerror /= 0) then
           print*,"vcycle2ddielectric: allocation error ",allocerror,
      &           ": could not allocate phicoarse to shape ",
+     &           nxlocalcoarse,nzlocalcoarse
+          call kaboom("vcycle2ddielectric: allocation error")
+          return
+        endif
+        allocate(testarraycoarse(-1:nxlocalcoarse+1,-1:nzlocalcoarse+1),
+     &           stat=allocerror)
+        if (allocerror /= 0) then
+          print*,"vcycle2ddielectric: allocation error ",allocerror,
+     &           ": could not allocate testarray to shape ",
      &           nxlocalcoarse,nzlocalcoarse
           call kaboom("vcycle2ddielectric: allocation error")
           return
@@ -7923,6 +7934,17 @@ c       --- Alloate new work space
         rhocoarse = 0.
         phicoarse = 0.
 
+C       Put 1's into test array to differentiate regions where nothing stored
+        do ti=-1,nxlocalcoarse+1
+          do tj=-1,nzlocalcoarse+1
+            testarraycoarse(ti,tj) = 1.00
+          enddo
+        enddo
+
+C         if(izproc==0)then
+C           print*, "EPS-INIT",nxlocal,nzlocal,epsilon
+C         endif
+
 c       --- Restriction - note that no scaling factor is needed
         call restrict2d(nx,nz,nxlocal,nzlocal,nxguardres,nzguardres,res,
      &                  nxcoarse,nzcoarse,nxlocalcoarse,nzlocalcoarse,
@@ -7932,14 +7954,78 @@ c       --- Restriction - note that no scaling factor is needed
      &                    nxcoarse,nzcoarse,nxlocalcoarse,nzlocalcoarse,
      &                    epsiloncoarse,
      &                    localbounds,localboundsc,lxoffset,lzoffset)
+
+C         print*,'nx:',nx,'nz:',nz,'nxlocal:',nxlocal,'nzlocal:',nzlocal
+C         print*,'nxcoarse:',nxcoarse,'nzcoarse:',nzcoarse
+C         print*,'nxlocalcoarse:',nxlocalcoarse,'nzlocalcoarse'
+C         !!print*,'localbounds',localbounds,'localboundscoarse',localboundsc
+C         print*,'lxoffset',lxoffset,'lzoffset',lzoffset
+
+C         !!print *,'AT:',mglevel,'BEFORE BC Applied:'
+C         print*,nxlocalcoarse+2,nzlocalcoarse+2,epsiloncoarse
+C         !!print *,'AT:',mglevel,'After BC', localbounds,'Applied:'
+
+
         call applyboundaryconditions3d(nxlocalcoarse-1,0,nzlocalcoarse-1,
      &                                 1,0,1,epsiloncoarse,1,localbounds,
      &                                 .true.,.false.)
+C         if(izproc==0)then
+C           print*, "EPSC",nxlocalcoarse,nzlocalcoarse,epsiloncoarse
+C         endif
+C     After epsilon restricted insert epsiloncoarse into testarraycoarse
+        do ti=0,nxlocalcoarse+1
+          do tj=0,nzlocalcoarse+1
+            testarraycoarse(ti,tj) = epsiloncoarse(ti,tj)
+          enddo
+        enddo
+
+C         if(izproc==0)then
+C           print*, "TAC-PIN",fsdecomp%nz,coarsedecomp%nz,testarraycoarse
+C         endif
+#ifdef MPIPARALLEL
+C         if (any(coarsedecomp%mpistatex == 1) .or.
+C      &      any(coarsedecomp%mpistatez == 1)) then
+C           print*, "eps exchange tried"
+C           !!print*,"MPI State",coarsedecomp%mpistatex,coarsedecomp%mpistatez
+C           print*,"on proc",izproc,"coarse mpistatez:",coarsedecomp%mpistatez
+C           print*,"on proc",izproc,"full mpistatez:",fsdecomp%mpistatez
+C           call mgexchange_phi2(1,nxlocalcoarse,0,nzlocalcoarse,
+C      &                        testarraycoarse,1,0,1,
+C      &                        0,0,1,1,coarsedecomp)
+          call mgexchange_epsilon2(1,nxlocalcoarse,0,nzlocalcoarse,
+     &                        epsiloncoarse,1,0,1,
+     &                        -1,-1,0,0,coarsedecomp)
+C         endif
+C         call mgexchange_eps_periodic(1,nxlocalcoarse,0,nzlocalcoarse,
+C      &                               epsiloncoarse,1,0,1,
+C      &                               -1,-1,localboundsc,fsdecomp)
+#endif
+        if(izproc==0)then
+          print*, "TAC-PEX",nxlocalcoarse,nzlocalcoarse,epsiloncoarse
+        endif
+        if(izproc==1)then
+          print*, "TAC-PEX",nxlocalcoarse,nzlocalcoarse,epsiloncoarse
+        endif
+C         do ti=0,nxlocalcoarse+1
+C           do tj=0,nzlocalcoarse+1
+C             epsiloncoarse(ti,tj) = testarraycoarse(ti,tj) 
+C           enddo
+C         enddo
+
+C #ifdef MPIPARALLEL
+C         if(izproc==0) then
+C           localboundsc(5) = -1
+C         endif
+C         if(izproc==1) then
+C           localboundsc(4) = -1 
+C         endif
+C #endif
+C         print*,'on:',izproc,nxlocalcoarse+2,nzlocalcoarse+2,epsiloncoarse
 c       --- XXX epsiloncoarse needs to be exchanged among neighboring
 c       --- XXX processors. This code needs to be written, so this solver
 c       --- XXX will not work in parallel. (This is the only issue -
 c       --- XXX everything else here works OK in parallel.)
-
+c       print*, "epsiloncoarse:", epsiloncoarse
         if (lprintmgarraysumdiagnostic) then
           call mggetarraysum(nxlocalcoarse,0,nzlocalcoarse,0,0,0,
      &                       rhocoarse,coarsedecomp,0,sss)
@@ -7967,6 +8053,7 @@ c       --- Continue at the next coarsest level.
           call mgexchange_phiupdate(1,nxlocalcoarse,0,nzlocalcoarse,
      &                        phicoarse,nxguardphi,0,nzguardphi,
      &                        -1,-1,coarsedecomp)
+          print*, "PHIUPDATE CALLED FOR COARASE"
         endif
 #endif
         if (lprintmgarraysumdiagnostic) then
@@ -7983,13 +8070,14 @@ c       --- Add in resulting error.
         call applyboundaryconditions3d(nxlocal,0,nzlocal,
      &                                 nxguardphi,0,nzguardphi,phi,1,
      &                                 localbounds,.false.,.false.)
+C         print*,"PHI1",nxlocal+nxguardphi,nzlocal+nzguardphi,phi
 #ifdef MPIPARALLEL
         call mgexchange_phi_periodic(1,nxlocal,0,nzlocal,phi,
      &                               nxguardphi,0,nzguardphi,
      &                               -1,-1,localbounds,fsdecomp)
 #endif
-
-        deallocate(phicoarse,rhocoarse,epsiloncoarse)
+C         print*,"PHI2",nxlocal+nxguardphi,nzlocal+nzguardphi,phi
+        deallocate(phicoarse,rhocoarse,epsiloncoarse,testarraycoarse)
         deallocate(res)
 
 #ifdef MPIPARALLEL
@@ -8015,6 +8103,7 @@ c       --- Add in resulting error.
      &                      nxguardphi,0,nzguardphi,
      &                      -1,-1,fsdecomp)
 #endif
+C         print*,"PHI3",nxlocal+nxguardphi,nzlocal+nzguardphi,phi
         call mggetarraysum(nxlocal,0,nzlocal,nxguardphi,0,nzguardphi,
      &                     phi,fsdecomp,0,sss)
         if (lpe0) print*,"V5 phi",mglevel,sss
@@ -8131,7 +8220,7 @@ c       --- grid refinement.
         do iz=izmin,izmax
           ix1 = ixmin + mod(ixmin + iz + parity,2)
           do ix=ix1,ixmax,2
-
+C           Finding Phi(i,j)_k+1 = (1-w)*Phi(i,j)_k + w*S(i,j)
             phi(ix,iz) = mgparam*(rho(ix,iz) +
      &        0.5*(epsilon(ix  ,iz)+epsilon(ix  ,iz+1))*phi(ix-1,iz  )*dxsqi +
      &        0.5*(epsilon(ix+1,iz)+epsilon(ix+1,iz+1))*phi(ix+1,iz  )*dxsqi +
@@ -8379,6 +8468,7 @@ c     --- substantial amount of time.
         izmina(izcoarse) = izmin
         izmaxa(izcoarse) = izmax
         wza(:,izcoarse) = wz
+C         print*,'IZ',izmin,izmax,wza
       enddo
 
       do ixcoarse=1,nxlocalcoarse
@@ -8394,6 +8484,7 @@ c     --- substantial amount of time.
         ixmina(ixcoarse) = ixmin
         ixmaxa(ixcoarse) = ixmax
         wxa(:,ixcoarse) = wx
+C         print*,'IX',ixmin,ixmax,wxa
       enddo
 
 c     --- Do the loops.
